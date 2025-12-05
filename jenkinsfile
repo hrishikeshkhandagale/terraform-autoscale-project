@@ -1,0 +1,87 @@
+pipeline {
+    agent any
+
+    environment {
+        AWS_REGION = "ap-south-1"
+        TF_VAR_app_version = "build-${BUILD_ID}"   
+
+   
+        AWS_CRED = 'python'
+
+       
+        TERRAFORM_DIR = "."
+    }
+
+    triggers {
+        githubPush()   
+    }
+
+    stages {
+
+        stage('📥 Clone Repo') {
+            steps {
+                echo "Pulling source code from GitHub..."
+                checkout scm
+            }
+        }
+
+        stage('🔑 Configure AWS Credentials') {
+            steps {
+                withCredentials([string(credentialsId: "${AWS_CRED}", variable: 'AWS_CREDS')]) {
+                    sh '''
+                        echo "Configuring AWS credentials..."
+                        export AWS_ACCESS_KEY_ID=$(echo $AWS_CREDS | cut -d ':' -f1)
+                        export AWS_SECRET_ACCESS_KEY=$(echo $AWS_CREDS | cut -d ':' -f2)
+                        export AWS_DEFAULT_REGION='ap-south-1'
+                        echo "AWS auth successful."
+                    '''
+                }
+            }
+        }
+
+        stage('⚙ Terraform Init') {
+            steps {
+                sh """
+                    cd ${TERRAFORM_DIR}
+                    terraform init
+                """
+            }
+        }
+
+        stage('🔍 Terraform Plan') {
+            steps {
+                sh """
+                    cd ${TERRAFORM_DIR}
+                    terraform plan -out=tfplan -var="app_version=${TF_VAR_app_version}"
+                """
+            }
+        }
+
+        stage('🚀 Terraform Apply') {
+            steps {
+                sh """
+                    cd ${TERRAFORM_DIR}
+                    terraform apply -auto-approve tfplan
+                """
+            }
+        }
+
+        stage('🌐 Show ALB URL') {
+            steps {
+                sh """
+                    cd ${TERRAFORM_DIR}
+                    terraform output alb_dns_name
+                """
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "🚀 Deployment Successful — Version: ${TF_VAR_app_version}"
+        }
+        failure {
+            echo "❌ Deployment Failed — Check console logs"
+        }
+    }
+}
