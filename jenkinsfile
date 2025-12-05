@@ -6,7 +6,7 @@ pipeline {
         TF_VAR_app_version = "build-${BUILD_ID}"   
 
    
-        AWS_CRED = 'python'
+        AWS_CRED = 'Auto'
 
        
         TERRAFORM_DIR = "."
