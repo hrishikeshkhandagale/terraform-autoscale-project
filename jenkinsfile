@@ -3,17 +3,13 @@ pipeline {
 
     environment {
         AWS_REGION = "ap-south-1"
-        TF_VAR_app_version = "build-${BUILD_ID}"   
-
-   
-        AWS_CRED = 'Auto'
-
-       
-        TERRAFORM_DIR = "."
+        TF_VAR_app_version = "build-${BUILD_ID}"
+        AWS_CRED = "Auto"                 // Jenkins stored secret ID
+        TERRAFORM_DIR = "."               // Terraform root folder
     }
 
     triggers {
-        githubPush()   
+        githubPush()                      // Trigger on GitHub commit/push
     }
 
     stages {
@@ -25,29 +21,28 @@ pipeline {
             }
         }
 
-       stage('🔑 Configure AWS Credentials') {
-    steps {
-        withCredentials([string(credentialsId: "${AWS_CRED}", variable: 'AWS_CREDS')]) {
-            withEnv([
-                "AWS_ACCESS_KEY_ID=${AWS_CREDS.split(':')[0]}",
-                "AWS_SECRET_ACCESS_KEY=${AWS_CREDS.split(':')[1]}",
-                "AWS_DEFAULT_REGION=ap-south-1"
-            ]) {
-                sh '''
-                    echo "AWS auth successful."
-                    env | grep AWS
-                '''
+        stage('🔑 Configure AWS Credentials') {
+            steps {
+                withCredentials([string(credentialsId: "${AWS_CRED}", variable: 'AWS_CREDS')]) {
+                    withEnv([
+                        "AWS_ACCESS_KEY_ID=${AWS_CREDS.split(':')[0]}",
+                        "AWS_SECRET_ACCESS_KEY=${AWS_CREDS.split(':')[1]}",
+                        "AWS_DEFAULT_REGION=${AWS_REGION}"
+                    ]) {
+                        sh '''
+                            echo "AWS authentication configured"
+                            env | grep AWS
+                        '''
+                    }
+                }
             }
         }
-    }
-}
-
 
         stage('⚙ Terraform Init') {
             steps {
                 sh """
                     cd ${TERRAFORM_DIR}
-                    terraform init
+                    terraform init -reconfigure
                 """
             }
         }
@@ -56,7 +51,7 @@ pipeline {
             steps {
                 sh """
                     cd ${TERRAFORM_DIR}
-                    terraform plan -out=tfplan -var="app_version=${TF_VAR_app_version}"
+                    terraform plan -input=false -out=tfplan -var="app_version=${TF_VAR_app_version}"
                 """
             }
         }
@@ -85,7 +80,7 @@ pipeline {
             echo "🚀 Deployment Successful — Version: ${TF_VAR_app_version}"
         }
         failure {
-            echo "❌ Deployment Failed — Check console logs"
+            echo "❌ Deployment Failed — Check Jenkins logs"
         }
     }
 }
