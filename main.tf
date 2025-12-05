@@ -9,8 +9,11 @@ terraform {
   }
 }
 
+
 provider "aws" {
-  region = var.aws_region
+  region     = var.aws_region
+  access_key = env.AWS_ACCESS_KEY_ID
+  secret_key = env.AWS_SECRET_ACCESS_KEY
 }
 
 # -------- Get default VPC & subnets (demo साठी) --------
@@ -63,14 +66,13 @@ resource "aws_security_group" "ec2_sg" {
     security_groups = [aws_security_group.alb_sg.id]
   }
 
-  # OPTIONAL: SSH from your IP
-   ingress {
-     description = "SSH from my IP"
-     from_port   = 22
-     to_port     = 22
-     protocol    = "tcp"
-     cidr_blocks = ["0.0.0.0/0"]
-   }
+  ingress {
+    description = "SSH from my IP"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
 
   egress {
     from_port   = 0
@@ -97,9 +99,7 @@ resource "aws_launch_template" "web_lt" {
   name_prefix   = "${var.project_name}-lt-"
   image_id      = data.aws_ami.amazon_linux_2.id
   instance_type = var.instance_type
-  key_name = var.key_name
-
-
+  key_name      = var.key_name
 
   vpc_security_group_ids = [aws_security_group.ec2_sg.id]
 
@@ -192,14 +192,11 @@ resource "aws_autoscaling_group" "web_asg" {
     create_before_destroy = true
   }
 
-  #  instance refresh
   instance_refresh {
     strategy = "Rolling"
-
     preferences {
       min_healthy_percentage = 50
     }
-
     triggers = ["launch_template"]
   }
 }
@@ -274,5 +271,3 @@ resource "aws_cloudwatch_metric_alarm" "cpu_low" {
   alarm_actions = [
     aws_autoscaling_policy.scale_in.arn,
     aws_sns_topic.alerts.arn
-  ]
-}
