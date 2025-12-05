@@ -26,7 +26,7 @@ data "aws_subnets" "default" {
   }
 }
 
-# -------- Security Groups --------
+# -------- Security Groups ------
 
 # ALB SG
 resource "aws_security_group" "alb_sg" {
