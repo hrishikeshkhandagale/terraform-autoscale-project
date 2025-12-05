@@ -13,8 +13,7 @@ provider "aws" {
   region = var.aws_region
 }
 
-
-# -------- Get default VPC & subnets --------
+# -------- Get default VPC & subnets (demo साठी) --------
 data "aws_vpc" "default" {
   default = true
 }
@@ -26,9 +25,9 @@ data "aws_subnets" "default" {
   }
 }
 
-# -------- Security Groups ------
+# -------- Security Groups --------
 
-# ALB SG
+# ALB SG - allow HTTP from internet, allow healthcheck
 resource "aws_security_group" "alb_sg" {
   name        = "${var.project_name}-alb-sg"
   description = "ALB security group"
@@ -50,7 +49,7 @@ resource "aws_security_group" "alb_sg" {
   }
 }
 
-# EC2 SG
+# EC2 SG - allow HTTP from ALB only, SSH optional (from your IP)
 resource "aws_security_group" "ec2_sg" {
   name        = "${var.project_name}-ec2-sg"
   description = "EC2 security group"
@@ -64,13 +63,15 @@ resource "aws_security_group" "ec2_sg" {
     security_groups = [aws_security_group.alb_sg.id]
   }
 
-  ingress {
-    description = "SSH"
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
+  # OPTIONAL: SSH from your IP
+  #
+   ingress {
+     description = "SSH from my IP"
+     from_port   = 22
+     to_port     = 22
+     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
-  }
+   }
 
   egress {
     from_port   = 0
@@ -83,7 +84,7 @@ resource "aws_security_group" "ec2_sg" {
 # -------- AMI --------
 data "aws_ami" "amazon_linux_2" {
   most_recent = true
-  owners      = ["137112412989"]
+  owners      = ["137112412989"] # Amazon
 
   filter {
     name   = "name"
@@ -92,11 +93,15 @@ data "aws_ami" "amazon_linux_2" {
 }
 
 # -------- Launch Template --------
+
 resource "aws_launch_template" "web_lt" {
-  name_prefix         = "${var.project_name}-lt-"
-  image_id            = data.aws_ami.amazon_linux_2.id
-  instance_type       = var.instance_type
-  key_name            = var.key_name
+  name_prefix   = "${var.project_name}-lt-"
+  image_id      = data.aws_ami.amazon_linux_2.id
+  instance_type = var.instance_type
+  key_name = var.key_name
+
+
+
   vpc_security_group_ids = [aws_security_group.ec2_sg.id]
 
   user_data = base64encode(
@@ -108,6 +113,7 @@ resource "aws_launch_template" "web_lt" {
 
   tag_specifications {
     resource_type = "instance"
+
     tags = {
       Name    = "${var.project_name}-ec2"
       Project = var.project_name
@@ -115,12 +121,17 @@ resource "aws_launch_template" "web_lt" {
   }
 }
 
-# -------- ALB --------
+# -------- ALB + Target Group --------
+
 resource "aws_lb" "web_alb" {
   name               = "${var.project_name}-alb"
   load_balancer_type = "application"
   security_groups    = [aws_security_group.alb_sg.id]
   subnets            = data.aws_subnets.default.ids
+
+  tags = {
+    Project = var.project_name
+  }
 }
 
 resource "aws_lb_target_group" "web_tg" {
@@ -130,8 +141,16 @@ resource "aws_lb_target_group" "web_tg" {
   vpc_id   = data.aws_vpc.default.id
 
   health_check {
-    path  = "/"
-    matcher = "200"
+    path                = "/"
+    matcher             = "200"
+    interval            = 30
+    timeout             = 5
+    healthy_threshold   = 3
+    unhealthy_threshold = 2
+  }
+
+  tags = {
+    Project = var.project_name
   }
 }
 
@@ -147,6 +166,7 @@ resource "aws_lb_listener" "http" {
 }
 
 # -------- Auto Scaling Group --------
+
 resource "aws_autoscaling_group" "web_asg" {
   name                      = "${var.project_name}-asg"
   min_size                  = var.min_size
@@ -173,16 +193,20 @@ resource "aws_autoscaling_group" "web_asg" {
     create_before_destroy = true
   }
 
+  #  instance refresh
   instance_refresh {
     strategy = "Rolling"
+
     preferences {
       min_healthy_percentage = 50
     }
+
     triggers = ["launch_template"]
   }
 }
 
 # -------- Scaling Policies + CloudWatch Alarms --------
+
 resource "aws_autoscaling_policy" "scale_out" {
   name                   = "${var.project_name}-scale-out"
   autoscaling_group_name = aws_autoscaling_group.web_asg.name
@@ -210,7 +234,7 @@ resource "aws_sns_topic_subscription" "email_sub" {
   endpoint  = var.alert_email
 }
 
-# High CPU -> scale out
+# High CPU alarm -> scale out + SNS
 resource "aws_cloudwatch_metric_alarm" "cpu_high" {
   alarm_name          = "${var.project_name}-cpu-high"
   comparison_operator = "GreaterThanOrEqualToThreshold"
@@ -221,6 +245,7 @@ resource "aws_cloudwatch_metric_alarm" "cpu_high" {
   statistic           = "Average"
   threshold           = 60
 
+  alarm_description = "High CPU - scale out"
   dimensions = {
     AutoScalingGroupName = aws_autoscaling_group.web_asg.name
   }
@@ -231,7 +256,7 @@ resource "aws_cloudwatch_metric_alarm" "cpu_high" {
   ]
 }
 
-# Low CPU -> scale in
+# Low CPU alarm -> scale in
 resource "aws_cloudwatch_metric_alarm" "cpu_low" {
   alarm_name          = "${var.project_name}-cpu-low"
   comparison_operator = "LessThanOrEqualToThreshold"
@@ -242,6 +267,7 @@ resource "aws_cloudwatch_metric_alarm" "cpu_low" {
   statistic           = "Average"
   threshold           = 20
 
+  alarm_description = "Low CPU - scale in"
   dimensions = {
     AutoScalingGroupName = aws_autoscaling_group.web_asg.name
   }
